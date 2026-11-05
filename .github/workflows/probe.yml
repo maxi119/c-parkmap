@@ -1,0 +1,35 @@
+# 階段 0：驗證 GitHub Actions 的 IP 能否連上停管處與 Overpass。驗證完即刪除。
+name: probe
+on:
+  workflow_dispatch:
+  push:
+    paths: [".github/workflows/probe.yml"]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt
+      - name: pma-index-and-pdf
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import update_moto_parking as u
+          title, url = u.find_pdf_link()
+          data = u.download_pdf(url)
+          print(title, url, len(data))
+          PY
+      - name: overpass
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import update_moto_parking as u
+          u.CACHE.mkdir(exist_ok=True)
+          print(len(u.load_osm(force=True)))
+          PY
