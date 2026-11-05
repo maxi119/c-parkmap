@@ -1,36 +1,55 @@
-# 臺北市路邊機車收費路段 → Google My Maps
+# 臺北市路邊機車收費路段地圖
 
-從[停管處「停車收費資訊」](https://pma.gov.taipei/Content_List.aspx?n=0EC7D6A1032AA0D6)取得《路邊機車收費路段一覽表》PDF，
-用 OpenStreetMap 路網把路段轉成線段，輸出可匯入 Google My Maps 的 KML。
+**網站：<https://maxi119.github.io/c-parkmap/>**
 
-## 安裝
+非官方網站。從[停管處「停車收費資訊」](https://pma.gov.taipei/Content_List.aspx?n=0EC7D6A1032AA0D6)取得《路邊機車收費路段一覽表》PDF，
+用 OpenStreetMap 路網把路段轉成線段，發布成網頁地圖，也提供可匯入 Google My Maps 的 KML。
+位置為推算結果，實際收費範圍以現場標線與官方公告為準。
+
+## 架構
+
+```text
+GitHub Actions（每週一 09:00 台北時間）
+  → 停管處 PDF 有變更？ → 解析 + OSM 定位 → 產生 GeoJSON / KML
+  → commit 回 repo → 部署 GitHub Pages
+```
+
+- PDF 未變更時只更新 `site/data/status.json` 的最後檢查時間。
+- 每月第一個週一會重新下載 OSM 路網，讓路網的修正反映到地圖。
+- 任何一步失敗都不會部署，線上網站維持上一版，GitHub 會寄失敗通知信。
+
+## 手動觸發
+
+到 repo 的 **Actions → update → Run workflow**。
+
+| 選項 | 用途 |
+|---|---|
+| （都不勾） | 檢查 PDF，有變更才重建 |
+| `force` | PDF 未變更也重建 |
+| `refresh_osm` | 重新下載 OSM 路網並重建 |
+
+## 本機執行
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
-.venv\Scripts\python update_moto_parking.py --force   # 第一次產生輸出
-.\register_task.ps1                                    # 註冊每週排程
+.venv\Scripts\python update_moto_parking.py --force
+.venv\Scripts\python -m http.server --directory site   # 預覽 http://localhost:8000
 ```
-
-## 匯入 Google My Maps
-
-My Maps 沒有公開的寫入 API，**匯入這一步必須手動**；腳本能自動做到的是偵測更新、重建 KML、跳通知。
-
-- **第一次**：到 [mymaps.google.com](https://www.google.com/maps/d/) 建立地圖 → 匯入 `output/taipei_moto_parking_all.kml`。
-- **之後收到通知時**：點圖層的「⋮」→「重新匯入並合併」→「取代所有項目」，選同一個檔案。
-
-想依時段開關圖層時，改為每個時段各新增一層，分別匯入 `output/layers/*.kml`。
 
 ## 輸出
 
 | 檔案 | 內容 |
 |---|---|
-| `output/taipei_moto_parking_all.kml` | 全部路段，依收費時段上色 |
-| `output/layers/*.kml` | 依收費時段分檔，一檔一層 |
-| `output/segments.csv` | 每個路段的定位結果 |
-| `output/needs_review.csv` | 位置不精確或未畫出、需人工確認的路段 |
-| `output/CHANGES.md` | 每次更新新增、移除的路段 |
-| `update.log` | 執行紀錄 |
+| `site/data/segments.geojson` | 網站用的路段線段與結構化時段 |
+| `site/data/status.json` | 資料版本、最後檢查與更新時間、來源、各精度數量 |
+| `site/data/missing.json` | 未畫出的路段 |
+| `site/downloads/taipei_moto_parking_all.kml` | 全部路段，依收費時段上色 |
+| `site/downloads/layers/*.kml` | 依收費時段分檔，一檔一層 |
+| `site/downloads/segments.csv` | 每個路段的定位結果 |
+| `site/downloads/needs_review.csv` | 位置不精確或未畫出、需人工確認的路段 |
+| `data/CHANGES.md` | 每次改版新增、移除的路段 |
+| `data/state.json` | 判斷是否改版用的狀態，勿手動修改 |
 
 位置精度：
 
@@ -38,22 +57,33 @@ My Maps 沒有公開的寫入 API，**匯入這一步必須手動**；腳本能�
 |---|---|
 | `exact` | 在兩端路口之間切分（距路口 30 公尺內） |
 | `near` | 同上，但路口距離較遠（150 公尺內），或 PDF 段別有誤，端點可能略有偏差 |
-| `approx` | 找不到起訖點，畫出整條道路，名稱標 `[約略]` |
-| `missing` | OSM 查無此路名（多為無名巷、地標），**不會出現在地圖上** |
+| `approx` | 找不到起訖點，畫出整條道路，網站以虛線顯示 |
+| `missing` | OSM 查無此路名（多為無名巷、地標），不會出現在地圖上，網站另外列出 |
 | `manual` | 依 `overrides.csv` 人工標註 |
 
 ## 人工修正
 
-建立 `overrides.csv`（UTF-8），路段與起訖要和 PDF 或 `needs_review.csv` 完全相同。座標可從 Google 地圖右鍵複製，多點以分號分隔：
+建立或修改 `overrides.csv`（UTF-8），路段與起訖要和 PDF 或 `needs_review.csv` 完全相同。座標可從 Google 地圖右鍵複製，多點以分號分隔：
 
 ```csv
 路段,路段起訖,座標
 景文街282巷,景文街-景後街,"24.99001,121.54001;24.99101,121.54101"
 ```
 
-修改後執行 `update_moto_parking.py --force`。範例座標僅示範格式。
+範例座標僅示範格式。推上 `main` 後，Actions 會自動重建並部署。
+
+## 匯入 Google My Maps
+
+My Maps 沒有公開的寫入 API，匯入必須手動。從網站的「下載資料」取得 KML：
+
+- **第一次**：到 [mymaps.google.com](https://www.google.com/maps/d/) 建立地圖 → 匯入全部路段的 KML。
+- **資料更新後**：點圖層的「⋮」→「重新匯入並合併」→「取代所有項目」，選新下載的檔案。
+
+想依時段開關圖層時，改為每個時段各新增一層，分別匯入各時段的 KML。
 
 ## 資料與授權
 
-- 路段資料：臺北市停車管理工程處。地圖位置為推算結果，實際收費範圍以現場標線與官方公告為準。
-- 道路幾何：© OpenStreetMap 貢獻者（ODbL），公開分享地圖時請保留標示。
+- 路段資料：臺北市停車管理工程處，依其[著作權聲明](https://pma.gov.taipei/News_Content.aspx?n=2D376B94B447B084&sms=B01AA4D38E103E2A&s=F704FA8B68BCC5D9&ccms_cs=1)註明出處。原始 PDF 不收錄在 repo。
+- 道路幾何：© OpenStreetMap contributors（ODbL），公開分享地圖時請保留標示。
+- 底圖：內政部國土測繪中心。
+- 地圖函式庫：[Leaflet](https://leafletjs.com/) 1.9.4（BSD-2-Clause），收錄於 `site/vendor/`。

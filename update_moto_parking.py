@@ -5,12 +5,17 @@
   1. 從停管處「停車收費資訊」頁找出《路邊機車收費路段一覽表》PDF
   2. PDF 未變更就結束（用 SHA-256 判斷）；有變更才往下做
   3. 解析 PDF 表格 → 用 OpenStreetMap 路網把「路段 + 起訖」轉成線段
-  4. 輸出 KML（總表 + 依收費時段分層）、CSV、待人工確認清單、異動紀錄
+  4. 輸出網站資料（GeoJSON、狀態、未畫出清單）、KML（總表 + 依收費時段分層）、
+     CSV、待人工確認清單、異動紀錄
+
+每次檢查都會更新 site/data/status.json 的最後檢查時間；其餘輸出內容不含執行時間，
+輸入相同時結果也相同，因此不會產生多餘的 commit。
 
 用法：
-  python update_moto_parking.py            # 檢查更新，有變更才重建
-  python update_moto_parking.py --force    # 不管有無變更都重建
-  python update_moto_parking.py --notify   # 有變更或失敗時跳 Windows 通知
+  python update_moto_parking.py                # 檢查更新，有變更才重建
+  python update_moto_parking.py --force        # 不管有無變更都重建
+  python update_moto_parking.py --refresh-osm  # 重新下載 OSM 路網並重建
+  python update_moto_parking.py --notify       # 有變更或失敗時跳 Windows 通知
 """
 from __future__ import annotations
 
@@ -29,7 +34,7 @@ import time
 import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -38,10 +43,17 @@ import requests
 from bs4 import BeautifulSoup
 
 ROOT = Path(__file__).resolve().parent
-OUTPUT = ROOT / "output"
+SITE = ROOT / "site"
+SITE_DATA = SITE / "data"
+DOWNLOADS = SITE / "downloads"
+BUILD = ROOT / "build.tmp"
+DATA = ROOT / "data"                # 會 commit：Actions 每次都是全新環境，狀態不能放在 cache/
 CACHE = ROOT / "cache"
 ARCHIVE = ROOT / "archive"
-STATE_FILE = CACHE / "state.json"
+STATE_FILE = DATA / "state.json"
+CHANGES_FILE = DATA / "CHANGES.md"
+GEOJSON_FILE = SITE_DATA / "segments.geojson"
+STATUS_FILE = SITE_DATA / "status.json"
 OSM_FILE = CACHE / "osm_taipei_roads.json"
 OVERRIDES_FILE = ROOT / "overrides.csv"
 LOG_FILE = ROOT / "update.log"
@@ -60,6 +72,9 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; gmap-moto-parking/1.0)"}
 OVERPASS_HEADERS = {"User-Agent": "gmap-moto-parking/1.0"}   # Overpass 會拒絕仿瀏覽器的 User-Agent
 
 OSM_MAX_AGE_DAYS = 30
+OVERPASS_ROUNDS = 4         # 公共 Overpass 常滿載（HTTP 502/504），隔一段時間重試通常就會成功
+OVERPASS_RETRY_WAIT_S = 120
+OVERPASS_TIMEOUT_S = (30, 200)
 MIN_EXPECTED_ROWS = 100     # 低於此列數視為 PDF 改版或解析失敗，不覆蓋既有輸出
 CROSS_TOLERANCES_M = (30, 150)   # 道路與起訖路口的距離容許值：先嚴後寬，放寬者標為 near
 DENSIFY_M = 12              # 路網內插間距：OSM 節點稀疏時仍能精準切在路口
@@ -91,11 +106,25 @@ SCHEDULE_COLORS = {
     "週一至六 9-18時": "ff00b4d8",
     "週一至日 12-20時": "ffa040a0",
     "週一至六 12-20時": "ff909020",
-    "週六日及例假日 9-17時": "ff1f7fff",
+    "週六日及例假日 9-17時": "ff1e4a7a",
 }
 DEFAULT_COLOR = "ff808080"
+TAIPEI = timezone(timedelta(hours=8))   # 臺灣沒有日光節約時間，不依賴系統的時區資料庫
+WEEKDAYS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "日": 7}
 
 log = logging.getLogger("moto-parking")
+
+
+def now_taipei() -> datetime:
+    return datetime.now(TAIPEI).replace(microsecond=0)
+
+
+def build_inputs_digest() -> str:
+    """人工修正或程式變更後也要重建，不必記得手動加 --force。"""
+    digest = hashlib.sha256(Path(__file__).read_bytes())
+    if OVERRIDES_FILE.exists():
+        digest.update(OVERRIDES_FILE.read_bytes())
+    return digest.hexdigest()
 
 
 # ---------------------------------------------------------------- 資料結構
@@ -241,21 +270,25 @@ def load_osm(force: bool = False) -> list[dict]:
     if fresh and not force:
         return json.loads(OSM_FILE.read_text(encoding="utf-8"))
     last_error: Exception | None = None
-    for url in OVERPASS_URLS:
-        try:
-            log.info("下載 OSM 路網：%s", url)
-            resp = requests.post(url, data={"data": OVERPASS_QUERY}, headers=OVERPASS_HEADERS, timeout=300)
-            resp.raise_for_status()
-            ways = [w for w in resp.json()["elements"] if usable_way(w)]
-            if len(ways) < 1000:
-                raise RuntimeError(f"OSM 回傳道路過少：{len(ways)}")
-            tmp = OSM_FILE.with_suffix(".tmp")
-            tmp.write_text(json.dumps(ways, ensure_ascii=False), encoding="utf-8")
-            tmp.replace(OSM_FILE)
-            return ways
-        except (requests.RequestException, ValueError, KeyError, RuntimeError) as exc:
-            last_error = exc
-            log.warning("Overpass 失敗：%s", exc)
+    for attempt in range(OVERPASS_ROUNDS):
+        if attempt:
+            time.sleep(OVERPASS_RETRY_WAIT_S)
+        for url in OVERPASS_URLS:
+            try:
+                log.info("下載 OSM 路網（第 %d 輪）：%s", attempt + 1, url)
+                resp = requests.post(url, data={"data": OVERPASS_QUERY}, headers=OVERPASS_HEADERS,
+                                     timeout=OVERPASS_TIMEOUT_S)
+                resp.raise_for_status()
+                ways = [w for w in resp.json()["elements"] if usable_way(w)]
+                if len(ways) < 1000:
+                    raise RuntimeError(f"OSM 回傳道路過少：{len(ways)}")
+                tmp = OSM_FILE.with_suffix(".tmp")
+                tmp.write_text(json.dumps(ways, ensure_ascii=False), encoding="utf-8")
+                tmp.replace(OSM_FILE)
+                return ways
+            except (requests.RequestException, ValueError, KeyError, RuntimeError) as exc:
+                last_error = exc
+                log.warning("Overpass 失敗：%s", exc)
     if OSM_FILE.exists():
         log.warning("改用過期的 OSM 快取")
         return json.loads(OSM_FILE.read_text(encoding="utf-8"))
@@ -623,61 +656,154 @@ def safe_filename(schedule: str) -> str:
     return re.sub(r"[^\w\-]+", "_", schedule).strip("_")
 
 
+def write_text(path: Path, text: str) -> None:
+    """固定換行與編碼，Windows 與 Linux 產生的檔案才會相同。"""
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def write_json(path: Path, data) -> None:
+    write_text(path, json.dumps(data, ensure_ascii=False, indent=1) + "\n")
+
+
+def parse_schedule(schedule: str) -> dict:
+    """'週一至六 9-17時' → days [1..6]（ISO，週一為 1）、start 9、end 17。
+
+    對應不到時 days 為空，前端顯示原字串、不做「現在收費中」判斷。
+    holidays 只表示 PDF 明文列出例假日；其他時段在國定假日是否收費，PDF 沒有寫。
+    """
+    unknown = {"days": [], "start": None, "end": None, "holidays": False}
+    m = re.match(r"^週(.+?) (\d+)-(\d+)時$", schedule)
+    if not m:
+        return unknown
+    span, start, end = m.groups()
+    holidays = span.endswith("及例假日")
+    span = span.removesuffix("及例假日")
+    r = re.fullmatch(r"([一二三四五六日])至([一二三四五六日])", span)
+    if r:
+        days = list(range(WEEKDAYS[r.group(1)], WEEKDAYS[r.group(2)] + 1))
+    elif all(c in WEEKDAYS for c in span):
+        days = sorted(WEEKDAYS[c] for c in span)
+    else:
+        return unknown
+    return {"days": days, "start": int(start), "end": int(end), "holidays": holidays}
+
+
+def css_color(kml_color: str) -> str:
+    """KML 的 aabbggrr → CSS 的 #rrggbb。"""
+    return f"#{kml_color[6:8]}{kml_color[4:6]}{kml_color[2:4]}"
+
+
+def geojson_document(segments: list[Segment]) -> str:
+    """一個路段一行，改版時 diff 才看得出是哪些路段變了。"""
+    features = []
+    for seg in segments:
+        row = seg.row
+        feature = {
+            "type": "Feature",
+            "properties": {
+                "region": row.region, "schedule": row.schedule, "road": row.road, "span": row.span,
+                "quality": seg.quality, "note": seg.note, **parse_schedule(row.schedule),
+            },
+            "geometry": {
+                "type": "MultiLineString",
+                "coordinates": [[[round(lon, 6), round(lat, 6)] for lon, lat in line] for line in seg.lines],
+            },
+        }
+        features.append(json.dumps(feature, ensure_ascii=False, separators=(",", ":")))
+    return '{"type":"FeatureCollection","features":[\n' + ",\n".join(features) + "\n]}\n"
+
+
+def schedule_summary(segments: list[Segment]) -> list[dict]:
+    """圖例與下載清單用；顏色由這裡統一給，前端與 KML 才會一致。"""
+    counts = Counter(s.row.schedule for s in segments if s.lines)
+    return [
+        {"schedule": schedule, "count": count, "color": css_color(SCHEDULE_COLORS.get(schedule, DEFAULT_COLOR)),
+         "layer": f"downloads/layers/{safe_filename(schedule)}.kml"}
+        for schedule, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    ]
+
+
 def write_outputs(segments: list[Segment], version: str) -> None:
-    tmp = OUTPUT.with_name("output.tmp")
-    if tmp.exists():
-        shutil.rmtree(tmp)
-    (tmp / "layers").mkdir(parents=True)
+    """先全部寫到暫存目錄再換上去：中途失敗時，既有輸出不會變成一半新一半舊。"""
+    if BUILD.exists():
+        shutil.rmtree(BUILD)
+    data, downloads = BUILD / "data", BUILD / "downloads"
+    data.mkdir(parents=True)
+    (downloads / "layers").mkdir(parents=True)
 
     drawn = [s for s in segments if s.lines]
-    (tmp / "taipei_moto_parking_all.kml").write_text(
-        kml_document(f"臺北市路邊機車收費路段（{version}）", drawn, version), encoding="utf-8"
-    )
+    write_text(downloads / "taipei_moto_parking_all.kml",
+               kml_document(f"臺北市路邊機車收費路段（{version}）", drawn, version))
     groups: dict[str, list[Segment]] = defaultdict(list)
     for seg in drawn:
         groups[seg.row.schedule].append(seg)
-    for schedule, group in sorted(groups.items(), key=lambda kv: -len(kv[1])):
-        path = tmp / "layers" / f"{safe_filename(schedule)}.kml"
-        path.write_text(kml_document(f"機車收費 {schedule}", group, version), encoding="utf-8")
+    for schedule, group in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        path = downloads / "layers" / f"{safe_filename(schedule)}.kml"
+        write_text(path, kml_document(f"機車收費 {schedule}", group, version))
         features = sum(len(s.lines) for s in group)
         if features > MY_MAPS_FEATURE_LIMIT or path.stat().st_size > MY_MAPS_FILE_LIMIT:
             log.warning("%s 超過 My Maps 單層限制（%d 個線段）", path.name, features)
     if len(groups) > MY_MAPS_LAYER_LIMIT:
         log.warning("收費時段有 %d 種，超過 My Maps 每張地圖 %d 層的限制", len(groups), MY_MAPS_LAYER_LIMIT)
 
-    with (tmp / "segments.csv").open("w", encoding="utf-8-sig", newline="") as f:
-        w = csv.writer(f)
+    with (downloads / "segments.csv").open("w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f, lineterminator="\n")
         w.writerow(["區域", "收費時間", "路段", "路段起訖", "位置精度", "線段數", "備註"])
         for s in segments:
             w.writerow([s.row.region, s.row.schedule, s.row.road, s.row.span, s.quality, len(s.lines), s.note])
-    with (tmp / "needs_review.csv").open("w", encoding="utf-8-sig", newline="") as f:
-        w = csv.writer(f)
+    with (downloads / "needs_review.csv").open("w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f, lineterminator="\n")
         w.writerow(["路段", "路段起訖", "區域", "位置精度", "原因"])
         for s in segments:
             if s.quality in ("approx", "missing"):
                 w.writerow([s.row.road, s.row.span, s.row.region, s.quality, s.note])
 
-    # output/CHANGES.md 是累積紀錄，要帶到新版輸出
-    if (OUTPUT / "CHANGES.md").exists():
-        shutil.copy2(OUTPUT / "CHANGES.md", tmp / "CHANGES.md")
-    if OUTPUT.exists():
-        shutil.rmtree(OUTPUT)
-    tmp.replace(OUTPUT)
+    write_text(data / GEOJSON_FILE.name, geojson_document(drawn))
+    write_json(data / "missing.json", [
+        {"region": s.row.region, "schedule": s.row.schedule, "road": s.row.road, "span": s.row.span, "note": s.note}
+        for s in segments if not s.lines
+    ])
+    # status.json 由 write_status 寫入；先帶過來，換目錄時才不會遺失
+    if STATUS_FILE.exists():
+        shutil.copy2(STATUS_FILE, data / STATUS_FILE.name)
+
+    SITE.mkdir(exist_ok=True)
+    for src, dst in ((data, SITE_DATA), (downloads, DOWNLOADS)):
+        if dst.exists():
+            shutil.rmtree(dst)
+        src.replace(dst)
+    shutil.rmtree(BUILD)
+
+
+def write_status(state: dict, checked_at: str) -> None:
+    """除了 checked_at，其餘內容都來自 state，PDF 未變更時才不會產生其他差異。"""
+    SITE_DATA.mkdir(parents=True, exist_ok=True)
+    write_json(STATUS_FILE, {
+        "version": state["version"],
+        "checked_at": checked_at,
+        "updated_at": state["updated_at"],
+        "source_page": INDEX_URL,
+        "source_pdf": state["url"],
+        "source_title": state["title"],
+        "total": sum(state["counts"].values()),
+        "counts": state["counts"],
+        "schedules": state["schedules"],
+    })
 
 
 def record_changes(version: str, old: list[str], new: list[str]) -> tuple[list[str], list[str]]:
     added = sorted(set(new) - set(old))
     removed = sorted(set(old) - set(new))
-    path = OUTPUT / "CHANGES.md"
-    previous = path.read_text(encoding="utf-8") if path.exists() else "# 異動紀錄\n"
+    previous = CHANGES_FILE.read_text(encoding="utf-8") if CHANGES_FILE.exists() else "# 異動紀錄\n"
     head, _, rest = previous.partition("\n")
+    today = f"{now_taipei():%Y-%m-%d}"
     if old:
-        lines = [f"\n## {datetime.now():%Y-%m-%d} {version}（新增 {len(added)}、移除 {len(removed)}）"]
+        lines = [f"\n## {today} {version}（新增 {len(added)}、移除 {len(removed)}）"]
         lines += [f"- 新增：{k.replace('|', ' / ')}" for k in added]
         lines += [f"- 移除：{k.replace('|', ' / ')}" for k in removed]
     else:
-        lines = [f"\n## {datetime.now():%Y-%m-%d} {version}（首次建立，共 {len(new)} 段）"]
-    path.write_text(head + "\n" + "\n".join(lines) + "\n" + rest, encoding="utf-8")
+        lines = [f"\n## {today} {version}（首次建立，共 {len(new)} 段）"]
+    write_text(CHANGES_FILE, head + "\n" + "\n".join(lines) + "\n" + rest)
     return added, removed
 
 
@@ -705,33 +831,38 @@ def notify(title: str, message: str) -> None:
 
 # ---------------------------------------------------------------- 主流程
 
-def run(force: bool) -> tuple[bool, str]:
-    for d in (CACHE, ARCHIVE):
+def run(force: bool = False, refresh_osm: bool = False) -> tuple[bool, str]:
+    for d in (CACHE, ARCHIVE, DATA):
         d.mkdir(exist_ok=True)
     state = json.loads(STATE_FILE.read_text(encoding="utf-8")) if STATE_FILE.exists() else {}
 
     title, url = find_pdf_link()
     pdf_bytes = download_pdf(url)
+    checked_at = now_taipei().isoformat()
     digest = hashlib.sha256(pdf_bytes).hexdigest()
     changed = digest != state.get("sha256")
-    if not changed and not force:
+    inputs = build_inputs_digest()
+    built = GEOJSON_FILE.exists() and state.get("inputs") == inputs
+    if not (changed or force or refresh_osm or not built):
+        write_status(state, checked_at)   # 也讓排程有 commit 可寫，避免 repo 久無活動時被停用
         log.info("PDF 未變更：%s", title)
         return False, "未變更"
 
     pdf_path = CACHE / "latest.pdf"
     pdf_path.write_bytes(pdf_bytes)
     rows, made = parse_pdf(pdf_path)
-    version = made or datetime.now().strftime("%Y-%m-%d")
+    version = made or f"{now_taipei():%Y-%m-%d}"
     log.info("解析 %d 列，版本 %s", len(rows), version)
     if changed:
-        shutil.copy2(pdf_path, ARCHIVE / f"{datetime.now():%Y%m%d}_{digest[:8]}.pdf")
+        shutil.copy2(pdf_path, ARCHIVE / f"{now_taipei():%Y%m%d}_{digest[:8]}.pdf")
 
-    index = RoadIndex(load_osm(force=False))
+    index = RoadIndex(load_osm(force=refresh_osm))
     overrides = load_overrides()
     segments = []
     for row in rows:
         manual = overrides.get((row.road, row.span))
         segments.append(Segment(row, "manual", "", manual) if manual else locate(row, index))
+    previous = GEOJSON_FILE.read_bytes() if GEOJSON_FILE.exists() else b""
     write_outputs(segments, version)
 
     counts = Counter(s.quality for s in segments)
@@ -742,10 +873,16 @@ def run(force: bool) -> tuple[bool, str]:
         summary += f"；新增 {len(added)}、移除 {len(removed)}"
 
     # 全部成功才更新狀態，失敗時下次會重試
-    STATE_FILE.write_text(json.dumps(
-        {"sha256": digest, "title": title, "url": url, "version": version,
-         "checked": datetime.now().isoformat(timespec="seconds"), "rows": [r.key for r in rows]},
-        ensure_ascii=False, indent=1), encoding="utf-8")
+    data_changed = changed or GEOJSON_FILE.read_bytes() != previous
+    state = {
+        "sha256": digest, "inputs": inputs, "title": title, "url": url, "version": version,
+        "updated_at": checked_at if data_changed or "updated_at" not in state else state["updated_at"],
+        "counts": {q: counts[q] for q in ("exact", "near", "manual", "approx", "missing") if counts[q]},
+        "schedules": schedule_summary(segments),
+        "rows": [r.key for r in rows],
+    }
+    write_json(STATE_FILE, state)
+    write_status(state, checked_at)
     log.info(summary)
     return changed, summary
 
@@ -753,6 +890,7 @@ def run(force: bool) -> tuple[bool, str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--force", action="store_true", help="PDF 未變更也重建")
+    parser.add_argument("--refresh-osm", action="store_true", help="重新下載 OSM 路網並重建")
     parser.add_argument("--notify", action="store_true", help="有變更或失敗時跳 Windows 通知")
     args = parser.parse_args()
 
@@ -764,7 +902,7 @@ def main() -> int:
     )
     logging.getLogger("pdfminer").setLevel(logging.ERROR)
     try:
-        changed, summary = run(args.force)
+        changed, summary = run(args.force, args.refresh_osm)
     except Exception as exc:  # 排程環境沒人看 console：所有失敗都要留紀錄並通知
         log.exception("更新失敗，既有輸出未更動")
         if args.notify:

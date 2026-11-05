@@ -1,0 +1,71 @@
+{
+ "version": "115年9月",
+ "checked_at": "2026-11-05T19:26:50+08:00",
+ "updated_at": "2026-11-05T19:05:12+08:00",
+ "source_page": "https://pma.gov.taipei/Content_List.aspx?n=0EC7D6A1032AA0D6",
+ "source_pdf": "https://www-ws.gov.taipei/Download.ashx?u=LzAwMS9VcGxvYWQvNDU1L3JlbGZpbGUvMC8zMDQ0MS80MzRmODUwYS1kYjM5LTQzM2ItOWQ1MS1lNWNmODVjN2JhYzgucGRm&n=6Lev6YKK5qmf6LuK5pS26LK76Lev5q615LiA6Ka96KGoMTE1LjkucGRm&icon=..pdf",
+ "source_title": "路邊機車收費路段一覽表(11507)(pdf 檔)(365.60 KB)",
+ "total": 546,
+ "counts": {
+  "exact": 461,
+  "near": 24,
+  "approx": 39,
+  "missing": 22
+ },
+ "schedules": [
+  {
+   "schedule": "週一至六 9-17時",
+   "count": 340,
+   "color": "#e06f2f",
+   "layer": "downloads/layers/週一至六_9-17時.kml"
+  },
+  {
+   "schedule": "週一至五 9-17時",
+   "count": 86,
+   "color": "#1f8ad0",
+   "layer": "downloads/layers/週一至五_9-17時.kml"
+  },
+  {
+   "schedule": "週一至日 9-20時",
+   "count": 36,
+   "color": "#d03030",
+   "layer": "downloads/layers/週一至日_9-20時.kml"
+  },
+  {
+   "schedule": "週一至六 9-20時",
+   "count": 18,
+   "color": "#30a030",
+   "layer": "downloads/layers/週一至六_9-20時.kml"
+  },
+  {
+   "schedule": "週一至日 9-21時",
+   "count": 17,
+   "color": "#e22b8a",
+   "layer": "downloads/layers/週一至日_9-21時.kml"
+  },
+  {
+   "schedule": "週一至六 9-18時",
+   "count": 13,
+   "color": "#d8b400",
+   "layer": "downloads/layers/週一至六_9-18時.kml"
+  },
+  {
+   "schedule": "週一至六 12-20時",
+   "count": 6,
+   "color": "#209090",
+   "layer": "downloads/layers/週一至六_12-20時.kml"
+  },
+  {
+   "schedule": "週一至日 12-20時",
+   "count": 6,
+   "color": "#a040a0",
+   "layer": "downloads/layers/週一至日_12-20時.kml"
+  },
+  {
+   "schedule": "週六日及例假日 9-17時",
+   "count": 2,
+   "color": "#7a4a1e",
+   "layer": "downloads/layers/週六日及例假日_9-17時.kml"
+  }
+ ]
+}

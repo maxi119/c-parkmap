@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>臺北機車收費路段地圖</title>
+  <meta name="description" content="非官方的臺北市路邊機車收費路段地圖，資料來自臺北市停車管理工程處公布的路段一覽表。">
+  <meta name="theme-color" content="#1f2937">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f2937'/%3E%3Cpath d='M6 22 14 10l5 8 3-4 4 8' fill='none' stroke='%23e06f2f' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="heading">
+      <h1>臺北機車收費路段</h1>
+      <p id="status" class="status">載入中…</p>
+    </div>
+    <button id="panel-toggle" class="button panel-toggle" type="button" aria-expanded="false" aria-controls="panel">圖例與資訊</button>
+  </header>
+
+  <p id="stale" class="banner banner-warn" hidden></p>
+  <p id="error" class="banner banner-error" role="alert" hidden></p>
+
+  <main class="layout">
+    <div class="map-area">
+      <div id="map" aria-label="收費路段地圖"></div>
+      <div class="map-tools">
+        <button id="now-toggle" class="button" type="button" aria-pressed="false">現在收費中</button>
+        <button id="locate" class="button" type="button">我的位置</button>
+      </div>
+      <p id="toast" class="toast" role="status" hidden></p>
+    </div>
+
+    <aside id="panel" class="panel">
+      <section class="block">
+        <label class="search-label" for="search">搜尋路名或區域</label>
+        <input id="search" class="search" type="search" placeholder="例如：松仁路、信義商圈" autocomplete="off">
+        <p id="search-count" class="hint" hidden></p>
+        <ul id="search-results" class="results"></ul>
+      </section>
+
+      <section class="block">
+        <p id="now-note" class="note" hidden></p>
+        <div class="block-head">
+          <h2>收費時段</h2>
+          <button id="legend-all" class="link" type="button">全部關閉</button>
+        </div>
+        <ul id="legend" class="legend"></ul>
+        <p class="hint"><span class="swatch swatch-approx" aria-hidden="true"></span>虛線為約略位置：找不到起訖路口，畫出整條道路。</p>
+      </section>
+
+      <section class="block">
+        <h2>使用前請注意</h2>
+        <p class="disclaimer">非官方網站，位置為推算結果，實際收費範圍以現場標線與官方公告為準。</p>
+        <p class="hint">依官方一覽表註記，收費路段上的人行道機慢車停放區與特殊格位，現場可能不繪黃色外框線及收費路段文字。</p>
+      </section>
+
+      <section class="block">
+        <details>
+          <summary id="missing-summary">未畫出的路段</summary>
+          <p class="hint">這些路段在 OpenStreetMap 查無路名，地圖上看不到，但仍可能收費。</p>
+          <ul id="missing" class="plain-list"></ul>
+        </details>
+      </section>
+
+      <section class="block">
+        <details>
+          <summary>下載資料（可匯入 Google My Maps）</summary>
+          <ul id="downloads" class="plain-list">
+            <li><a href="downloads/taipei_moto_parking_all.kml" download>全部路段 KML</a></li>
+            <li><a href="downloads/segments.csv" download>路段定位結果 CSV</a></li>
+            <li><a href="downloads/needs_review.csv" download>待確認路段 CSV</a></li>
+          </ul>
+        </details>
+      </section>
+
+      <section class="block sources">
+        <h2>資料來源</h2>
+        <ul class="plain-list">
+          <li>路段資料：<a id="source-link" href="https://pma.gov.taipei/Content_List.aspx?n=0EC7D6A1032AA0D6" target="_blank" rel="noopener">臺北市停車管理工程處</a><span id="source-version"></span></li>
+          <li>道路幾何：<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>（ODbL）</li>
+          <li>底圖：<a href="https://maps.nlsc.gov.tw/" target="_blank" rel="noopener">內政部國土測繪中心</a></li>
+        </ul>
+      </section>
+    </aside>
+  </main>
+
+  <script src="vendor/leaflet-1.9.4/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
