@@ -1,6 +1,6 @@
 # 臺北市路邊機車收費路段地圖
 
-**網站：<https://maxi119.github.io/c-parkmap/>**
+**網站：<https://maxi119.github.io/c-parkmap/site/>**
 
 非官方網站。從[停管處「停車收費資訊」](https://pma.gov.taipei/Content_List.aspx?n=0EC7D6A1032AA0D6)取得《路邊機車收費路段一覽表》PDF，
 用 OpenStreetMap 路網把路段轉成線段，發布成網頁地圖，也提供可匯入 Google My Maps 的 KML。
@@ -9,18 +9,18 @@
 ## 架構
 
 ```text
-GitHub Actions（每週一 09:00 台北時間）
+Ubuntu / WSL 或 GitHub Actions
   → 停管處 PDF 有變更？ → 解析 + OSM 定位 → 產生 GeoJSON / KML
-  → commit 回 repo → 部署 GitHub Pages
+  → 更新 site/ → 網站提供最新內容
 ```
 
 - PDF 未變更時只更新 `site/data/status.json` 的最後檢查時間。
-- 每月第一個週一會重新下載 OSM 路網，讓路網的修正反映到地圖。
-- 任何一步失敗都不會部署，線上網站維持上一版，GitHub 會寄失敗通知信。
+- Ubuntu / WSL 每週一 09:00（台北時間）自動更新，每月第一週會重新下載 OSM 路網。
+- GitHub Actions 的自動排程已關閉，不會定期更新 <https://maxi119.github.io/c-parkmap/site/>。
 
-## 手動觸發
+## 用 GitHub Actions 手動更新
 
-到 repo 的 **Actions → update → Run workflow**。
+到 repo 的 **Actions → update → Run workflow**。推送網站、`overrides.csv`、主程式、`requirements.txt` 或 workflow 的變更時也會執行。任何一步失敗都不會部署，GitHub 會寄失敗通知信。
 
 | 選項 | 用途 |
 |---|---|
@@ -36,6 +36,36 @@ python -m venv .venv
 .venv\Scripts\python update_moto_parking.py --force
 .venv\Scripts\python -m http.server --directory site   # 預覽 http://localhost:8000
 ```
+
+## 在 Ubuntu / WSL 上執行
+
+不需要 GitHub Actions 也能運作。已在 WSL 的 Ubuntu 26.04（Python 3.14）測試更新流程與網站；`install.sh` 尚未實跑。
+
+```bash
+sudo apt install python3-venv git
+git clone https://github.com/maxi119/c-parkmap.git ~/c-parkmap
+cd ~/c-parkmap
+bash deploy/install.sh 8080
+```
+
+會安裝兩個 user-level systemd 服務：
+
+- `c-parkmap-update.timer`：每週一 09:00（台北時間）執行 `deploy/update.sh`，錯過時間時會在下次開機後補跑。結果只 commit 到本機，不會 push。
+- `c-parkmap-web.service`：用 `python3 -m http.server` 提供 `site/`，網址為 `http://<主機>:8080/`。
+
+常用指令：
+
+```bash
+systemctl --user start c-parkmap-update.service   # 立刻更新一次
+journalctl --user -u c-parkmap-update.service     # 查看紀錄
+```
+
+注意事項：
+
+- **WSL**：WSL 閒置時會停止，服務也會跟著停，只適合自己使用。
+- **「我的位置」**：瀏覽器只允許在 HTTPS 或 localhost 下定位。用區網 IP 開啟時這個按鈕不會動作；公開服務請在前面加 nginx 或 Caddy 提供 HTTPS。
+- **避免衝突**：Actions 的自動排程已關閉，但手動或推送觸發時仍會 commit `status.json`，之後在主機上 `git pull` 可能發生衝突。
+- **路網來源**：不同 Overpass 鏡像的資料可能有差異，更新路網後數量可能略有變動。
 
 ## 輸出
 

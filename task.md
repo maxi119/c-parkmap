@@ -1,14 +1,30 @@
 # GitHub Pages 版本實作計畫
 
-狀態：**程式與自動更新已完成，等待切換 Pages 來源與第一次正式排程**（規劃日期 2026-11-05，最後更新 2026-11-05）
+狀態：**程式與自動更新已完成；執行環境改為以 WSL / Ubuntu 為主，GitHub Actions 非必要**（規劃日期 2026-11-05，最後更新 2026-11-05）
+
+## 方向調整（2026-11-05）
+
+擁有者決定不必堅持 GitHub Actions，本機 WSL 能正常運作即可，之後再找 Ubuntu 主機放置。
+
+目前網址：<https://maxi119.github.io/c-parkmap/site/>。根網址顯示 README 是因為 Pages 來源為「Deploy from branch」；不走 Actions 部署的話，不必切換。
+
+WSL（Ubuntu 26.04、Python 3.14.4）實測：
+
+- [x] 依 `requirements.txt` 安裝成功。
+- [x] `--force` 重建：exact 461、near 24、approx 39、missing 22，與基準相同，`git diff` 只有 `checked_at`。
+- [x] `deploy/update.sh` 實跑成功，96 秒內更新路網並在本機 commit。
+- [x] 暫時的 `http.server` 提供 `site/`，WSL 內與 Windows 的 `localhost` 都回 200。
+- [ ] `deploy/install.sh` **尚未實跑**：常駐服務的安裝被權限檢查擋下，需由擁有者執行。目前只確認過腳本語法與 timer 的時間設定。
+- [ ] 系統的 `python3-venv` 未安裝（需要 sudo）。測試時用 `--without-pip` 加 `get-pip.py` 代替。
+
+更新路網時的發現：`overpass-api.de` 回 502，改由 `overpass.kumi.systems` 提供，道路數 18,061（先前 18,142），`堤頂大道2段407巷20弄` 因此變成 missing（exact 460、missing 23）。原因是資料來源不同，不是程式問題；尚未確認是鏡像落後還是 OSM 實際變更。測試結果沒有進入 repo。
 
 ## 待辦（需要 repo 擁有者操作）
 
-1. **切換 Pages 來源**：Settings → Pages → Build and deployment → Source 改為 **GitHub Actions**，再到 Actions → update → Run workflow 執行一次。
-   目前來源是「Deploy from branch」，根網址顯示的是 README；網站暫時在 <https://maxi119.github.io/c-parkmap/site/>。切換後網址改為 <https://maxi119.github.io/c-parkmap/>，`/site/` 會失效。
-2. **決定資料與底圖的使用是否可接受**（見下方「開始前要決定」的查核結果）。
-3. **確認失敗通知**：GitHub 帳號 Settings → Notifications → Actions 要開啟失敗通知。
-4. **2026-11-09（週一）之後**：確認第一次排程成功，再移除本機排程（階段 4）。
+1. **在 WSL 安裝服務**：`sudo apt install python3-venv` 後執行 `bash deploy/install.sh 8080`（測試副本在 `~/c-parkmap`）。
+2. **移除 Windows 排程**（階段 4）：Actions 的自動排程已關閉（2026-11-05），WSL 服務裝好後就只留一個地方更新。在那之前，`/site/` 的資料不會定期更新，只有手動或推送觸發時才會。
+3. **決定資料與底圖的使用是否可接受**（見下方「開始前要決定」的查核結果）。
+4. **若仍要用 Actions 部署到根網址**：Settings → Pages → Source 改為 **GitHub Actions**，切換後 `/site/` 會失效；並確認帳號有開失敗通知。
 
 ## 目標
 
@@ -100,6 +116,8 @@ GitHub Actions（每週）
 **驗收** ✅：線上網址以桌機（1280×800）與手機（390×844）寬度的無頭 Chrome 開啟，圖例、彈出視窗、虛線樣式、免責聲明都正常，console 沒有錯誤。尚未在實體手機上測試。
 
 ## 階段 3：GitHub Actions（`.github/workflows/update.yml`）
+
+> 2026-11-05 已移除 `schedule` 觸發與每月更新路網的判斷，以下為當時的紀錄。保留手動與推送觸發。
 
 - [x] 觸發：`schedule` + `workflow_dispatch`（可選 `force`、`refresh_osm`），另加推送網站、`overrides.csv`、主程式時觸發。
   - 每週一 09:00 台北時間 = cron `0 1 * * 1`。

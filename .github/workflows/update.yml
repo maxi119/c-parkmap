@@ -1,10 +1,8 @@
-# 每週檢查停管處 PDF，更新資料並部署 GitHub Pages。
+# 檢查停管處 PDF，更新資料並部署 GitHub Pages。自動排程已關閉，只在手動或推送時執行。
 # 任何一步失敗都不會部署，線上網站維持上一版，GitHub 會寄出失敗通知信。
 name: update
 
 on:
-  schedule:
-    - cron: "0 1 * * 1"   # 每週一 09:00 台北時間（實際執行可能延遲）
   workflow_dispatch:
     inputs:
       force:
@@ -57,17 +55,12 @@ jobs:
 
       - name: 檢查更新
         env:
-          EVENT: ${{ github.event_name }}
           FORCE: ${{ inputs.force }}
           REFRESH_OSM: ${{ inputs.refresh_osm }}
         run: |
           args=()
           [ "$FORCE" = "true" ] && args+=(--force)
           [ "$REFRESH_OSM" = "true" ] && args+=(--refresh-osm)
-          # 每月第一個週一更新路網，讓 OSM 的修正能反映到地圖
-          if [ "$EVENT" = "schedule" ] && [ "$(TZ=Asia/Taipei date +%-d)" -le 7 ]; then
-            args+=(--refresh-osm)
-          fi
           python update_moto_parking.py "${args[@]}"
 
       - name: 保存路網快取
@@ -78,7 +71,6 @@ jobs:
           path: cache/osm_taipei_roads.json
           key: osm-${{ hashFiles('cache/osm_taipei_roads.json') }}
 
-      # PDF 未變更時也會有 status.json 的差異：這個 commit 同時避免排程因 repo 久無活動被停用
       - name: 有差異才 commit
         run: |
           git add site data
