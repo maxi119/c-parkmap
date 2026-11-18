@@ -8,7 +8,8 @@
   <meta name="theme-color" content="#1f2937">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f2937'/%3E%3Cpath d='M6 22 14 10l5 8 3-4 4 8' fill='none' stroke='%23e06f2f' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css">
-  <link rel="stylesheet" href="style.css">
+  <!-- 修改 style.css 或 app.js 時，把下面與頁尾的 ?v= 改成當天日期，避免瀏覽器沿用舊檔 -->
+  <link rel="stylesheet" href="style.css?v=20261118">
 </head>
 <body>
   <header class="topbar">
@@ -95,6 +96,6 @@
   </main>
 
   <script src="vendor/leaflet-1.9.4/leaflet.js"></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=20261118"></script>
 </body>
 </html>

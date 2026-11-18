@@ -69,6 +69,12 @@ journalctl --user -u c-parkmap-update.service     # 查看紀錄
 - **避免衝突**：Actions 的自動排程已關閉，但手動或推送觸發時仍會 commit `status.json`，之後在主機上 `git pull` 可能發生衝突。
 - **路網來源**：不同 Overpass 鏡像的資料可能有差異，更新路網後數量可能略有變動。
 
+## 修改網站樣式或程式
+
+GitHub Pages 會快取檔案約 10 分鐘。修改 `site/style.css` 或 `site/app.js` 時，
+請把 `site/index.html` 裡兩處 `?v=` 改成當天日期（例如 `?v=20261118`），讓頁面載入新檔。
+資料檔（`site/data/*.json`）已設定每次重新驗證，不需要處理。
+
 ## 輸出
 
 | 檔案 | 內容 |
