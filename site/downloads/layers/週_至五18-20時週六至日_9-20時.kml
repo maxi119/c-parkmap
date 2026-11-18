@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>機車收費 週㇐至五18-20時週六至日 9-20時</name><Style id="sff808080"><LineStyle><color>ff808080</color><width>5</width></LineStyle></Style>
+<Placemark><name>松智路（松高路-松壽路）</name><description><![CDATA[區域：其他收費路段<br>收費時間：週㇐至五18-20時週六至日 9-20時<br>路段：松智路<br>起訖：松高路-松壽路<br>位置精度：依路口切分<br>資料版本：115年11月<br>來源：臺北市停車管理工程處；道路幾何 © OpenStreetMap 貢獻者]]></description><styleUrl>#sff808080</styleUrl><LineString><tessellate>1</tessellate><coordinates>121.565561,25.039107 121.565526,25.03899 121.565444,25.035877</coordinates></LineString></Placemark>
+</Document></kml>
