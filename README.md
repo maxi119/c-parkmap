@@ -6,6 +6,8 @@
 用 OpenStreetMap 路網把路段轉成線段，發布成網頁地圖，也提供可匯入 Google My Maps 的 KML。
 位置為推算結果，實際收費範圍以現場標線與官方公告為準。
 
+覺得有幫助的話，歡迎[贊助支持](https://portaly.cc/maxi119/support)。
+
 ## 架構
 
 ```text
